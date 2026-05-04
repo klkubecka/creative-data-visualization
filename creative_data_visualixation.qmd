@@ -242,11 +242,11 @@ sat_map <- sat_map |> layout(
 
 ```{r}
 # exporting plotly figure as HTML
-saveWidget(sat_map, "sattelite_3d_orbits.html", selfcontained = TRUE,
-           title = "Sattelite 3D Orbital Map")
+saveWidget(sat_map, "satellite_3d_orbits.html", selfcontained = TRUE,
+           title = "Satellite 3D Orbital Map")
 
 # Letting user know the script is finished. Plotly figure is stored in the repo file.
-cat("Saved: sattelite_3d_orbits.html\n")
+cat("Saved: satellite_3d_orbits.html\n")
 cat(" Open this file in any browser for interactive 3D visualization.\n")
 
 ```
