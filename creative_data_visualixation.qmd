@@ -4,6 +4,7 @@ format: html
 ---
 
 ```{r}
+#| eval: false
 # Loading in appropriate packages
 library(readxl)
 library(dplyr)
@@ -15,6 +16,7 @@ library(htmlwidgets)
 
 
 ```{r}
+#| eval: false
 # Loading in data frame from data file in repo
 sats <- "data/UCS-Satellite-Database 5-1-2023.xlsx"
 
@@ -55,7 +57,7 @@ apogee < 50000
 
 
 ```{r}
-
+#| eval: false
 orbital_ellipse <- function(a, ecc, incl_rad, raan = 0, n_pts = 120) { # Function that takes orbital parameters and returns them as list of x, y, z. a = semi-major axis, ecc = eccentricity, incl_rad = inclination, raan = rotation around earth axis, n_pts = number of points to draw
   ecc <- min(abs(ecc), 0.95) # Sets max eccentricity to 0.95, 1 would be an escape trajectory
   b <- a * sqrt(max(1 - ecc^2, 1e-6)) # computes how wide the ellipse is perpendicular t the long axis
@@ -196,6 +198,7 @@ cat("Built", length(trace_list), "traces total\n")
 
 
 ```{r}
+#| eval: false
 # applying visual styling to map
 sat_map <- sat_map |> layout(
   title = list(
@@ -241,6 +244,7 @@ sat_map <- sat_map |> layout(
 
 
 ```{r}
+#| eval: false
 # exporting plotly figure as HTML
 saveWidget(sat_map, "satellite_3d_orbits.html", selfcontained = TRUE,
            title = "Satellite 3D Orbital Map")
