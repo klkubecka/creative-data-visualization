@@ -1,0 +1,252 @@
+---
+title: "creative-data-visualization"
+format: html
+---
+
+```{r}
+# Loading in appropriate packages
+library(readxl)
+library(dplyr)
+library(plotly)
+library(htmlwidgets)
+
+```
+
+
+
+```{r}
+# Loading in data frame from data file in repo
+sats <- "data/UCS-Satellite-Database 5-1-2023.xlsx"
+
+# renaming columns for easier coding later on
+sats <- read_excel(sats) |>
+  rename(
+    perigee = "Perigee (km)",
+    apogee = "Apogee (km)",
+    inclination = "Inclination (degrees)",
+    period_min = "Period (minutes)",
+    orbit_class = "Class of Orbit",
+    purpose = Purpose,
+    name = "Name of Satellite, Alternate Names"
+  ) |>
+  mutate(
+    perigee = as.numeric(perigee),
+    apogee = as.numeric(apogee),
+    inclination = as.numeric(inclination),
+    period_min = as.numeric(period_min)
+  ) |> # Reading columns as numbers 
+  filter(
+    !is.na(perigee), !is.na(apogee), !is.na(inclination),
+perigee >0, apogee >0,
+apogee < 50000
+  ) |> # dropping rows with missing values and some outliers (deep-space probes)
+  mutate(
+    orbit_class = case_when(
+      orbit_class == "LEo" ~ "LEO",
+      TRUE ~ orbit_class
+    ), # Fixing spelling errors
+    semi_major_axis = (perigee + apogee)/2 + 6371, # Computing orbit semi-major axis
+    eccentricity = (apogee - perigee)/(apogee + perigee +2 *6371), # calculating orbit stretch
+    incl_rad = inclination * pi / 180 # coverting from degrees to radians
+  )
+
+```
+
+
+
+```{r}
+
+orbital_ellipse <- function(a, ecc, incl_rad, raan = 0, n_pts = 120) { # Function that takes orbital parameters and returns them as list of x, y, z. a = semi-major axis, ecc = eccentricity, incl_rad = inclination, raan = rotation around earth axis, n_pts = number of points to draw
+  ecc <- min(abs(ecc), 0.95) # Sets max eccentricity to 0.95, 1 would be an escape trajectory
+  b <- a * sqrt(max(1 - ecc^2, 1e-6)) # computes how wide the ellipse is perpendicular t the long axis
+  theta <- seq(0, 2*pi, length.out = n_pts) # creating even angles
+  # computing x and y coordinates of ellipse in orbital plane
+  x_pf <- a * cos(theta) - a * ecc
+  y_pf <- b * sin(theta) 
+  
+  # Rotates flat orbits by the inclination angle
+  x1 <- x_pf
+  y1 <- y_pf * cos(incl_rad)
+  z1 <- y_pf*sin(incl_rad)
+  
+  # Rotates tilted orbit around Earths polar axis by RAAN angle
+  x2 <- x1 * cos(raan) - y1 * sin(raan)
+  y2 <- x1 * sin(raan) + y1 * cos(raan)
+  list(x = x2, y = y2, z = z1)
+}
+
+
+
+set.seed(42) # Fixed rng so same satellites sampled every time
+
+sample_orbits <- sats |>
+  group_by(orbit_class) |> # group by orbit classes (LEO, MEO, GEO, Elliptical)
+  slice_sample(n = 200, replace = FALSE) |> # Randomly pick 200 satellites from each class
+  ungroup() |> 
+  mutate(raan = runif(n(), 0, 2 * pi)) # Assigning random RAAN since database didn't store them. Randomizes the spread to visually see orbits rather than stacking them on top of each other
+
+
+
+orbit_colors <- c(
+  LEO = "gold1",
+  GEO = "forestgreen",
+  MEO = "firebrick1",
+  Elliptical = "ivory2"
+)
+
+n_sph <- 50
+
+# Creating 50 latitude angles and 50 longitude angles
+phi <- seq(0, pi, length.out = n_sph) 
+lam <- seq(0,2*pi, length.out = n_sph)
+
+# Converting the lat and long to x, y, z
+earth_x <- outer(sin(phi), cos(lam)) * 6371
+earth_y <- outer(sin(phi), sin(lam)) * 6371
+earth_z <- outer(cos(phi), rep(1, n_sph))* 6371
+
+# Creating 50x50 matrix, used to prevent rainbow effect happening for Earths surface
+earth_surf <- matrix(0.5, nrow = n_sph, ncol = n_sph)
+
+# Creating a blank plotly figure and adding the Earth sphere. Defining the color gradient for the sphere and controlling how the light hits the sphere surfaces
+sat_map <-plot_ly() |>
+  add_surface(
+  x = earth_x,
+  y = earth_y,
+  z = earth_z,
+  surfacecolor = earth_surf,
+  colorscale = list(list(0, "#0d2137"), list(0.5, "#1b406e"), list(1, "#2a5fa5")),
+  showscale = FALSE,
+  opacity = 0.9,
+  hoverinfo = "skip",
+  lighting = list(ambient = 0.5, diffuse = 0.9, specular = 0.15, roughness = 0.7),
+  name = "Earth",
+  showlegend = FALSE
+)
+
+
+# Loop once per orbit class
+for (cls in unique(sample_orbits$orbit_class)) {
+  samp_sat <- sample_orbits |> filter(orbit_class == cls)
+  col <- orbit_colors[cls] 
+  if (is.na(col)) col <- "#fff"
+  ft_legend <- TRUE
+  dot_x <- dot_y <- dot_z <- dot_txt <- c()
+  
+ # Inner loop goes over each satellite one at a time to draw the individual orbit 
+   for (i in seq_len(nrow(samp_sat))) {
+    row <- samp_sat[i, ]
+    pts <- tryCatch(
+      orbital_ellipse(row$semi_major_axis, row$eccentricity, row$incl_rad, row$raan),
+      error = function(e) NULL) # catches errors and returns NULL
+    if(is.null(pts)) next # If the ellipse calculation fails, skips the satellite
+    
+# Adds orbit lines to figure    
+    sat_map <- add_trace(sat_map,
+      type = "scatter3d",
+      x = pts$x,
+      y = pts$y,
+      z = pts$z,
+      mode = "lines",
+      line = list(color = col, width = 1),
+      opacity = 0.45,
+      showlegend = ft_legend,
+      legendgroup = cls,
+      name = cls,
+      hoverinfor = "skip"
+    )
+    first_legend = FALSE
+    
+  # batching all dots for a class into a single trace
+    dot_x <- c(dot_x, pts$x[1])
+    dot_y <- c(dot_y, pts$y[1])
+    dot_z <- c(dot_z, pts$z[1])
+    dot_txt <- c(dot_txt, paste0(
+      "<b>", row$name, "</b>",
+      "<br>Class :", row$orbit_class,
+      "<br>Purpose: ", row$purpose,
+      "<br>Perigee: ", round(row$perigee), " km",
+      "<br>Apogee: ", round(row$apogee), "km",
+      "<br>Inclination: " , round(row$inclination, 1), "\u00b0"
+    ))
+  }
+  
+# adds one batched dot trace for entire class  
+  if (length(dot_x) >0) {
+    sat_map <- add_trace(sat_map,
+      type = "scatter3d",
+      x = dot_x,
+      y = dot_y,
+      z = dot_z,
+      mode = "markers",
+      marker = list(color = col, size = 2.4, opacity = 1),
+      showlegend = FALSE,
+      legendgroup = cls,
+      name = cls,
+      text = dot_txt,
+      hovertemplate = "%{text}<extra></extra>"
+    )
+  }
+}  
+
+cat("Built", length(trace_list), "traces total\n")
+
+```
+
+
+
+```{r}
+# applying visual styling to map
+sat_map <- sat_map |> layout(
+  title = list(
+    text = "Global Sattelite Orbital Map | UCS Database May 2023 | ~800 sampled orbits",
+    font=list(color = "#e0e8f0", size = 18),
+    x = 0.5, xanchor = "center"
+  ),
+  paper_bgcolor = "#050d1a", # Background color
+  # setting background color, hiding grid lines, tick marks and labels so only Earth and the orbits are visible 
+  scene = list(
+    bgcolor = "#050d1a",
+    xaxis = list(title = "", showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE, showbackground = FALSE),
+    yaxis = list(title = "", showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE, showbackground = FALSE),
+    zaxis = list(title = "", showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE, showbackground = FALSE),
+# Setting initial camera position
+    camera = list(
+      eye = list(x = 1.6, y = 1.6, z = 0.8),
+      up = list(x = 0, y = 0, z = 1)
+    ),
+    aspectmode = "data"
+  ),
+  legend = list(
+    title = list(text = "Orbit Class", font = list(color = "#e0e8f0")),
+    font = list(color = "#e0e8f0"),
+    bgcolor = "rgba(5, 13, 26, 0.75)",
+    bordercolor = "#2a4a6e",
+    borderwidth = 1,
+    x = 0.01, y = 0.99
+  ),
+  margin = list(l = 0, r = 0, t = 50, b = 0),
+  annotations = list(list(
+    text = "LEO = Low Earth Orbit (<2,000 km) | MEO = Medium Earth Orbit | GEO = Geostationary (35,786 km) | Elliptical = High-eccentricity",
+    showarrow = FALSE,
+    xref = "paper", yref = "paper",
+    x = 0.5, y = 0.01,
+    font = list(color = "#7a9abc", size = 10),
+    align = "center"
+  ))
+)
+
+```
+
+
+
+```{r}
+# exporting plotly figure as HTML
+saveWidget(sat_map, "sattelite_3d_orbits.html", selfcontained = TRUE,
+           title = "Sattelite 3D Orbital Map")
+
+# Letting user know the script is finished. Plotly figure is stored in the repo file.
+cat("Saved: sattelite_3d_orbits.html\n")
+cat(" Open this file in any browser for interactive 3D visualization.\n")
+
+```
